@@ -1,0 +1,27 @@
+# Sanitized example of a cloudflared ingress configuration.
+#
+# This is the file-based alternative to the TUNNEL_TOKEN approach in
+# docker-compose.yml. It maps a public hostname to an internal service.
+# The connector dials OUT to Cloudflare; Cloudflare routes matching requests
+# back down the tunnel to the `service` address on the internal network.
+#
+# All identifiers below are placeholders.
+
+tunnel: <REDACTED-tunnel-uuid>
+credentials-file: /etc/cloudflared/<REDACTED-tunnel-uuid>.json
+
+# Ingress rules are evaluated top-to-bottom; the first hostname match wins,
+# and the final catch-all returns 404 so nothing else is ever exposed.
+ingress:
+  # Public Nextcloud, the ONLY hostname intentionally exposed.
+  - hostname: cloud.your-domain.com
+    service: https://nextcloud:443
+    originRequest:
+      noTLSVerify: true        # origin serves HTTPS with a self-signed cert; this skips verifying it (public TLS already terminated at the edge)
+      # Nextcloud serves large files; raise timeouts for big uploads/syncs.
+      connectTimeout: 30s
+      # disableChunkedEncoding: false
+
+  # Catch-all: anything that doesn't match an explicit hostname gets 404.
+  # This is what guarantees no other internal service can leak out the tunnel.
+  - service: http_status:404

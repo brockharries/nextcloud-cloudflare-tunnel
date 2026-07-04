@@ -1,0 +1,74 @@
+# Sanitized example stack: Nextcloud behind a Cloudflare Tunnel.
+#
+# This mirrors how I actually run it (LinuxServer.io Nextcloud + MariaDB in a
+# container on Proxmox, with cloudflared as the ONLY ingress path), with all
+# secrets pulled out into .env. Copy .env.example -> .env and fill in real
+# values locally. NEVER commit a real .env.
+#
+# The critical property: no `ports:` are published to the host for Nextcloud.
+# The only way in from the public internet is through cloudflared, which makes
+# an OUTBOUND connection to Cloudflare. The home firewall stays fully closed.
+
+services:
+  nextcloud:
+    image: lscr.io/linuxserver/nextcloud:latest
+    container_name: nextcloud
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - ./config/nextcloud:/config        # app config
+      - nextcloud-data:/data              # user files (back this up!)
+    # NOTE: deliberately no `ports:` mapping to the host.
+    # Nextcloud is reachable only on the internal docker network below.
+    networks:
+      - edge
+    depends_on:
+      nextcloud-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nextcloud-db:
+    image: mariadb:latest
+    container_name: nextcloud-db
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${DB_NAME}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - nextcloud-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - edge
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    # Run the named tunnel. The token is issued by Cloudflare per-tunnel and
+    # is the only credential that lets this connector join the tunnel.
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}   # <REDACTED> in .env
+    # Alternatively, mount cloudflared/config.yml + a credentials file instead
+    # of using a token. See cloudflared/config.example.yml for the ingress rules.
+    networks:
+      - edge
+    depends_on:
+      - nextcloud
+    restart: unless-stopped
+
+networks:
+  edge:
+    driver: bridge
+
+volumes:
+  nextcloud-data:
+  nextcloud-db:

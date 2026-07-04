@@ -1,0 +1,19 @@
+# Never commit real secrets or runtime state
+.env
+*.env
+!.env.example
+
+# cloudflared credentials / real config
+cloudflared/*.json
+cloudflared/config.yml
+!cloudflared/config.example.yml
+
+# Nextcloud / DB runtime data
+config/
+data/
+*.sqlite
+*.db
+
+# OS / editor noise
+.DS_Store
+*.swp
