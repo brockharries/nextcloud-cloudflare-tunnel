@@ -125,3 +125,5 @@ The home version and the production version share a skeleton: outbound-only ingr
 ## Why I built this (in one line)
 
 I'm building a career in security/compliance SaaS pre-sales. Those customers face this same problem, exposing a sensitive internal service safely, and I wanted to have solved it with my own hands, on my own hardware, so that when I explain the trade-offs, it's from operating the thing, not reading about it.
+
+The same design serves my demo site, [brockharries.dev](https://brockharries.dev), from a DMZ segment through its own outbound-only tunnel. Port scan the domain and you will find the edge, not me.
