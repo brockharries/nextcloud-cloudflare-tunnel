@@ -17,8 +17,16 @@ ingress:
   - hostname: cloud.your-domain.com
     service: https://nextcloud:443
     originRequest:
-      noTLSVerify: true        # origin serves HTTPS with a self-signed cert; this skips verifying it (public TLS already terminated at the edge)
-      # Nextcloud serves large files; raise timeouts for big uploads/syncs.
+      # The origin serves HTTPS with a self-signed cert and this skips verifying
+      # it. The connector-to-origin hop is still encrypted, but the origin is not
+      # authenticated, so anything able to sit on that hop could pose as
+      # Nextcloud. Accepted here and listed in docs/threat-model.md. Better
+      # practice: give the origin a certificate the connector can verify
+      # (Cloudflare origin cert or an internal CA via caPool) and remove this.
+      noTLSVerify: true
+      # connectTimeout is how long cloudflared waits to open a connection to
+      # the origin. It does not govern how long an upload may run, and it does
+      # not change Cloudflare's request-size limits. 30s is the default.
       connectTimeout: 30s
       # disableChunkedEncoding: false
 

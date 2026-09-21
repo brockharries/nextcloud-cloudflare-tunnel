@@ -12,7 +12,7 @@ boundaries, not pretending it has none.
 
 | Threat | How it's mitigated |
 |---|---|
-| Internet background scanning / mass exploitation of the origin | No inbound ports are open for this service; a scan finds no web-facing listener. (The network's one WAN exposure, a two-port realtime-media forward to an isolated DMZ host, is documented in the vlan repo.) |
+| Direct scanning of the origin's web ports | No inbound ports are open for this service; a scan finds no web-facing listener. Attacks addressed to the hostname still come through the tunnel and reach Nextcloud; see residual risk below. (The network's one WAN exposure, a two-port realtime-media forward to an isolated DMZ host, is documented in the vlan repo.) |
 | Origin IP exposure / targeted attack on the residence's connection | Public DNS resolves to Cloudflare anycast IPs; the origin IP is never published. |
 | Volumetric DDoS against the service | Absorbed at Cloudflare's edge before it can reach the home uplink. |
 | Common web attacks (injection, known CVE probes) | Partially. Cloudflare's edge offers rate limiting and WAF rules (coverage depends on plan and configuration), which cuts down the noise. Requests that pass still reach Nextcloud, so this reduces exposure rather than replacing app patching; see residual risk below. |
@@ -22,10 +22,11 @@ boundaries, not pretending it has none.
 ## What it does NOT defend against (residual risk)
 
 - **Cloudflare is in the trust path.** At the TLS-terminating edge, Cloudflare can see plaintext traffic to the proxied hostname. This is an accepted trade for a personal workload; a "no third party in the path" requirement would rule this design out.
+- **The connector does not authenticate the origin.** `cloudflared` reaches Nextcloud over HTTPS with `noTLSVerify: true`, because the origin certificate is self-signed. That hop is encrypted, but nothing proves the thing answering is Nextcloud. Anything able to sit on that hop (another container on the same Docker network, or the host itself) could impersonate the origin and read traffic. Accepted for a hop that never leaves one host. The better practice is an origin certificate the connector verifies, with `noTLSVerify` removed.
 - **Application-layer compromise of Nextcloud itself.** If Nextcloud has an auth bypass or RCE, the tunnel faithfully delivers the attacker's request to it. The edge reduces *exposure*, it does not patch the app. Mitigations: keep Nextcloud updated, enforce strong/MFA auth, and (at scale) gate the hostname behind Cloudflare Access so unauthenticated traffic never reaches the login page.
 - **Connector compromise / lateral movement.** A compromised `cloudflared` host could pivot on its network segment. Mitigated by VLAN segmentation + firewall rules between segments, and (at scale) network policy limiting the connector to only the one service it fronts.
 - **A single connector is an availability SPOF.** One `cloudflared` instance means a restart drops the public path. Mitigated at scale with multiple connector replicas.
 - **Cloudflare account compromise.** Whoever controls the Cloudflare account controls the tunnel and DNS. Protect it with a strong password + hardware MFA; it is now part of the attack surface.
 
 ## Separate, non-public admin path
-Full administrative access (SSH, hypervisor UI) is not exposed through the public tunnel at all. It runs over a **Tailscale** mesh VPN with identity-based access. The public tunnel only ever knows about the single Nextcloud hostname. This keeps the blast radius of the public entry point to exactly one application.
+Full administrative access (SSH, hypervisor UI) is not exposed through the public tunnel at all. It runs over a **Tailscale** mesh VPN with identity-based access. The public tunnel only ever knows about the single Nextcloud hostname. That limits what is published, not what a compromise can reach: the connector, Nextcloud and the database share one Docker network, so whoever takes over one of them can talk to the other two.

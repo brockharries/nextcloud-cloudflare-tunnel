@@ -30,9 +30,9 @@ A Cloudflare Tunnel fronts a containerized Nextcloud instance. The only thing th
 How it fits together:
 
 - **Nextcloud** runs as a Docker container (LinuxServer.io image) inside an LXC on my Proxmox cluster. It listens only on the internal LAN. It is not bound to any public interface and has no router port-forward.
-- **`cloudflared`** runs as a companion container on the same internal network. On startup it dials *outbound* to Cloudflare's edge over HTTPS/QUIC and holds open a persistent tunnel. Because the connection originates from inside, it sails through the firewall like any other outbound web request. No inbound rule required.
+- **`cloudflared`** runs as a companion container on the same internal network. On startup it dials *outbound* to Cloudflare's edge on port 7844, using QUIC over UDP and falling back to HTTP/2 over TCP, and holds open a persistent tunnel. Because the connection originates from inside, a stateful firewall passes it and no inbound rule is required. One catch if you restrict egress: a policy that only allows 443 out is not enough, because the connector needs 7844.
 - **Cloudflare's edge** is the public front door. Public DNS for `cloud.your-domain.com` is a CNAME to the tunnel, so the name resolves to *Cloudflare's* anycast IPs, never to my home IP. Visitors hit Cloudflare; Cloudflare hands the request down the existing tunnel to `cloudflared`; `cloudflared` proxies it to Nextcloud on the LAN.
-- **TLS terminates at Cloudflare's edge** with a managed, auto-renewing certificate, and is re-encrypted over the tunnel. So there's no Let's Encrypt renewal cron for me to forget, and no cert material exposed to the internet.
+- **TLS terminates at Cloudflare's edge** with a managed, auto-renewing certificate, and is re-encrypted over the tunnel. So there's no Let's Encrypt renewal cron for me to forget, and no cert material exposed to the internet. The last hop, connector to Nextcloud, is HTTPS against a self-signed certificate that the connector does not verify. That hop is encrypted but the origin is not authenticated, and the threat model lists it as a residual risk.
 - The home network itself is segmented on **UniFi VLANs with firewall rules** between segments and runs **Pi-hole** for DNS filtering. A **Tailscale** mesh VPN provides a separate, identity-based path for full admin access (SSH, Proxmox UI) that is *never* exposed publicly at all. The public tunnel only ever sees the one Nextcloud hostname.
 
 ### Architecture
@@ -58,7 +58,7 @@ flowchart LR
 
     user -->|HTTPS| dns --> edge
     edge -.->|"persistent tunnel<br/>(established outbound<br/>from inside)"| cflared
-    cflared -->|"HTTPS (self-signed),<br/>LAN-internal"| nc
+    cflared -->|"HTTPS (self-signed,<br/>not verified), LAN-internal"| nc
     nc --> db
     cflared -.->|"outbound dial only"| fw
 ```
@@ -84,7 +84,7 @@ nextcloud-cloudflare-tunnel/
 
 **The decision: use a Cloudflare Tunnel instead of a port-forward + reverse proxy.**
 
-A reverse proxy on a forwarded port (Nginx Proxy Manager, Caddy, Traefik, SWAG) is the more common home-lab answer, and it's a perfectly good pattern. I deliberately chose the tunnel instead. The reasoning is the part of this write-up I care most about, because picking one viable option over other viable options, and being able to defend the trade-off, is the actual job.
+A reverse proxy on a forwarded port (Nginx Proxy Manager, Caddy, Traefik, SWAG) is the more common home-lab answer, and it's a perfectly good pattern. I deliberately chose the tunnel instead. The reasoning is the part of this write-up I care most about, because the other options would have worked too.
 
 What drove it:
 
@@ -116,9 +116,9 @@ This runs a household. If I were standing it up for an organization, the design 
 
 **HA data tier.** The single MariaDB here would become a replicated/managed database, and Nextcloud's data directory would sit on redundant, snapshotted, off-site-replicated storage rather than a single pool.
 
-**Defense in depth past the edge.** The edge does a lot, but I wouldn't let the origin assume it's safe. I'd add WAF rules tuned to the app, rate limiting, fail2ban-style lockout at the origin, and network policy so a compromised connector can reach *only* the one service it fronts, not the rest of the segment.
+**Defense in depth past the edge.** The edge does a lot, but I wouldn't let the origin assume it's safe. I'd add WAF rules tuned to the app, rate limiting, fail2ban-style lockout at the origin, and network policy so a compromised connector can reach *only* the one service it fronts, not the rest of the segment. I'd also give the origin a certificate the connector actually verifies (a Cloudflare origin certificate or an internal CA) and turn `noTLSVerify` off, which is the better practice I skipped at home.
 
-The home version and the production version share a skeleton: outbound-only ingress, no open ports, identity at the edge. What scale adds is stakes. More people behind the service, a bigger blast radius when something breaks, and a design that has to be legible to people who never met the person who built it. Sequencing those upgrades, and being able to defend the sequence, is the actual work.
+The home version and the production version share a skeleton: outbound-only ingress, no open ports, identity at the edge. For an organization I would do tested recovery first, because nothing else on this list helps once the data is gone. Connector redundancy and tighter access controls come after that.
 
 ---
 

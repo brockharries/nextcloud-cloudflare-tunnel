@@ -66,6 +66,9 @@ services:
     restart: unless-stopped
 
 networks:
+  # All three containers share this one network, so each can reach the others.
+  # Moving the database to its own network with only Nextcloud attached would
+  # keep the connector away from it.
   edge:
     driver: bridge
 
